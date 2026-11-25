@@ -19,7 +19,7 @@ from homeassistant.util import dt
 DOMAIN = "temporary_unifi_badges"
 LOGGER = logging.getLogger(__name__)
 KIND = vol.In(["contractor", "visitor"])
-NAME = re.compile(r"(contractor|visitor)\s+#?([1-9][0-9]*)", re.I)
+NAME = re.compile(r"(contractor|visitor)\s+#?(0*[1-9][0-9]*)", re.I)
 
 
 class ControllerError(Exception):
@@ -92,7 +92,7 @@ async def async_setup(hass, config):
                     number = int(match[2])
                     if number in matches:
                         raise ControllerError(f"Duplicate {kind} badge number {number} in UniFi.")
-                    matches[number] = {"id": user["id"], "name": f"{kind.title()} {number}"}
+                    matches[number] = {"id": user["id"], "name": match[0]}
             if len(seen) >= body.get("pagination", {}).get("total", len(seen)):
                 return [matches[number] for number in sorted(matches)]
             if not users:
