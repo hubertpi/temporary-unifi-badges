@@ -14,10 +14,11 @@ class BadgeKiosk extends HTMLElement {
 
   screen(title) {
     this.root.innerHTML = `<style>
-      :host { position:relative; display:grid; min-height:100%; box-sizing:border-box; place-items:center;
+      :host { position:relative; display:grid; min-height:100dvh; box-sizing:border-box; place-items:center;
         padding:clamp(64px, 11vh, 110px) 0 24px;
         background:#061736 url("${THEME_ASSETS}/airframe-blueprint.png") center / cover no-repeat;
         color:#fff; font:inherit; }
+      :host(:has(.home-screen)) { padding-bottom:clamp(64px, 11vh, 110px); }
       .brand { position:absolute; top:clamp(16px,4vh,40px); right:3.5%;
         width:clamp(110px,14.5%,240px); height:auto; pointer-events:none; }
       main { width:min(90%, 40rem); box-sizing:border-box; margin:0 auto; }
