@@ -180,11 +180,65 @@ async def setup_manager(hass, raw_settings):
             return
         connection.send_result(msg["id"], {"badges": badges, "today": dt.now().date().isoformat()})
 
+    async def fetch_badge(kind, user_id):
+        suffix = "/" + quote(user_id, safe="")
+        user = (await request("GET", suffix))["data"]
+        match = badge_name(user)
+        if not match or match[1].lower() != kind:
+            raise ControllerError("This user is no longer a matching UniFi badge.")
+        return suffix, user, match[0]
+
+    @websocket_api.websocket_command({
+        vol.Required("type"): DOMAIN + "/details",
+        vol.Required("kind"): KIND,
+        vol.Required("user_id"): str,
+    })
+    @websocket_api.require_admin
+    @websocket_api.async_response
+    async def ws_details(hass, connection, msg):
+        try:
+            async with lock:
+                _, user, _ = await fetch_badge(msg["kind"], msg["user_id"])
+                lease = leases.get(msg["user_id"])
+                pending = bool(lease and (lease["pending"] or lease["deadline"] <= dt.utcnow().timestamp()))
+                last_day = None
+                if lease and not pending:
+                    cutoff = dt.as_local(datetime.fromtimestamp(lease["deadline"], timezone.utc))
+                    last_day = (cutoff.date() - timedelta(days=1)).isoformat()
+        except ControllerError as err:
+            connection.send_error(msg["id"], "unifi_error", str(err))
+            return
+        connection.send_result(msg["id"], {
+            "status": user.get("status"), "last_day": last_day, "pending": pending,
+        })
+
+    @websocket_api.websocket_command({
+        vol.Required("type"): DOMAIN + "/deactivate",
+        vol.Required("kind"): KIND,
+        vol.Required("user_id"): str,
+    })
+    @websocket_api.require_admin
+    @websocket_api.async_response
+    async def ws_deactivate(hass, connection, msg):
+        user_id = msg["user_id"]
+        try:
+            async with lock:
+                _, _, name = await fetch_badge(msg["kind"], user_id)
+                lease = {"name": name, "deadline": dt.utcnow().timestamp(), "pending": True}
+                await store.async_save({**leases, user_id: lease})
+                leases[user_id] = lease
+            await expire()
+        except (ControllerError, OSError) as err:
+            connection.send_error(msg["id"], "deactivation_error", str(err))
+            return
+        connection.send_result(msg["id"], {"name": name, "pending": user_id in leases})
+
     @websocket_api.websocket_command({
         vol.Required("type"): DOMAIN + "/activate",
         vol.Required("kind"): KIND,
         vol.Required("user_id"): str,
         vol.Required("last_day"): str,
+        vol.Optional("update_expiration", default=False): bool,
     })
     @websocket_api.require_admin
     @websocket_api.async_response
@@ -207,26 +261,26 @@ async def setup_manager(hass, raw_settings):
             return
 
         user_id = msg["user_id"]
-        suffix = "/" + quote(user_id, safe="")
         try:
             async with lock:
-                badges = await list_badges(msg["kind"])
-                badge = next((item for item in badges if item["id"] == user_id), None)
-                if badge is None:
-                    raise ControllerError("This badge is no longer in the UniFi badge list.")
-                user = (await request("GET", suffix))["data"]
-                if user_id in leases:
-                    if leases[user_id]["pending"] or leases[user_id]["deadline"] <= dt.utcnow().timestamp():
-                        raise ControllerError("Deactivation is pending for this badge. Try again after UniFi confirms it.")
-                    raise ControllerError("This badge already has an active issuance.")
-                status = user.get("status")
-                if status == "ACTIVE":
-                    raise ControllerError("This user is already active in UniFi. Deactivate it in UniFi before issuing this badge.")
-                if status != "DEACTIVATED":
-                    raise ControllerError(f"UniFi reports status {status or 'unknown'}. The user must be deactivated before issuance.")
-                if deadline <= dt.utcnow().timestamp():
+                suffix, user, name = await fetch_badge(msg["kind"], user_id)
+                old = leases.get(user_id)
+                now = dt.utcnow().timestamp()
+                if old and (old["pending"] or old["deadline"] <= now):
+                    raise ControllerError("Deactivation is pending for this badge.")
+                if deadline <= now:
                     raise ControllerError("Choose today or a future date.")
-                lease = {"name": badge["name"], "deadline": deadline, "pending": True}
+                if msg["update_expiration"]:
+                    if user.get("status") != "ACTIVE":
+                        raise ControllerError("This badge is no longer active. Reopen it to issue it.")
+                    updated = {"name": name, "deadline": deadline, "pending": False}
+                    await store.async_save({**leases, user_id: updated})
+                    leases[user_id] = updated
+                    connection.send_result(msg["id"], {"name": name})
+                    return
+                if old or user.get("status") != "DEACTIVATED":
+                    raise ControllerError("This badge is not ready to issue. Reopen it to see its current status.")
+                lease = {"name": name, "deadline": deadline, "pending": True}
                 await store.async_save({**leases, user_id: lease})
                 leases[user_id] = lease
                 await set_status(suffix, "ACTIVE")
@@ -243,7 +297,7 @@ async def setup_manager(hass, raw_settings):
             await expire()
             connection.send_error(msg["id"], "storage_error", "Could not save the badge deadline.")
             return
-        connection.send_result(msg["id"], {"name": badge["name"]})
+        connection.send_result(msg["id"], {"name": name})
 
     await hass.http.async_register_static_paths([
         StaticPathConfig(
@@ -266,6 +320,8 @@ async def setup_manager(hass, raw_settings):
     hass.data[DOMAIN] = True
     websocket_api.async_register_command(hass, ws_list)
     websocket_api.async_register_command(hass, ws_activate)
+    websocket_api.async_register_command(hass, ws_details)
+    websocket_api.async_register_command(hass, ws_deactivate)
     async_track_time_interval(hass, expire, timedelta(seconds=15))
     hass.async_create_task(expire())
     start_refresh()
