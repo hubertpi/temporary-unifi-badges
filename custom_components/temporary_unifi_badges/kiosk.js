@@ -1,4 +1,5 @@
 const DOMAIN = "temporary_unifi_badges";
+const THEME_ASSETS = "/local/badge-kiosk-theme";
 
 class BadgeKiosk extends HTMLElement {
   constructor() {
@@ -13,18 +14,31 @@ class BadgeKiosk extends HTMLElement {
 
   screen(title) {
     this.root.innerHTML = `<style>
-      :host { display:grid; min-height:100%; place-items:center; background:var(--primary-background-color);
-        color:var(--primary-text-color); font:inherit; }
-      main { width:min(90%, 40rem); margin:2rem auto; }
+      :host { position:relative; display:grid; min-height:100%; box-sizing:border-box; place-items:center;
+        padding:clamp(64px, 11vh, 110px) 0 24px;
+        background:#061736 url("${THEME_ASSETS}/airframe-blueprint.png") center / cover no-repeat;
+        color:#fff; font:inherit; }
+      .brand { position:absolute; top:clamp(16px,4vh,40px); right:3.5%;
+        width:clamp(110px,14.5%,240px); height:auto; pointer-events:none; }
+      main { width:min(90%, 40rem); box-sizing:border-box; margin:0 auto; }
+      main:not(.home-screen) { padding:clamp(14px,3vw,28px); border-radius:20px;
+        background:rgba(5,20,49,.93); border:1px solid #294576; }
+      .home-screen { width:min(89%, 96rem); }
       h1 { font-size:clamp(1.4rem,3vw,2rem); }
-      button,input { font:inherit; color:inherit; background:var(--card-background-color);
-        border:1px solid var(--divider-color); border-radius:12px; min-height:48px; }
+      button,input { font:inherit; color:inherit; background:#122c57;
+        border:1px solid #45649a; border-radius:12px; min-height:48px; }
       button { cursor:pointer; padding:.5rem; }
       .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(100px,1fr)); gap:12px; }
       .badge-grid { display:flex; flex-wrap:wrap; justify-content:center; gap:12px; }
       .badge-grid button { flex:0 0 100px; box-sizing:border-box; }
-      .home { grid-template-columns:1fr 1fr; }
-      .home button { min-height:clamp(110px,22vh,240px); font-size:clamp(1.1rem,4vw,2rem); }
+      .home { grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:clamp(12px,3vw,42px); }
+      .home button { display:grid; place-content:center; justify-items:center; gap:.28em;
+        min-height:clamp(110px,36vh,370px); border:0; border-radius:clamp(16px,2.8vw,44px);
+        font-size:clamp(1rem,5vw,5rem); font-weight:700; letter-spacing:-.025em; }
+      .home ha-icon { --mdc-icon-size:1.65em; }
+      .visitor { background:#084bf5; color:#fff; }
+      .contractor { background:#ffc435; color:#081735; }
+      button:focus-visible, input:focus-visible { outline:3px solid #fff; outline-offset:3px; }
       .month { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
       .days { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:4px; text-align:center; }
       .days button { padding:.15rem; }
@@ -34,6 +48,12 @@ class BadgeKiosk extends HTMLElement {
       label { display:grid; gap:6px; margin-top:1rem; }
     </style><main></main>`;
     const main = this.root.querySelector("main");
+    const logo = document.createElement("img");
+    logo.className = "brand";
+    logo.alt = "Technetics Group";
+    logo.src = THEME_ASSETS + "/technetics-logo-original.png";
+    logo.onerror = () => logo.remove();
+    this.root.append(logo);
     if (title) this.text(main, "h1", title);
     return main;
   }
@@ -54,10 +74,16 @@ class BadgeKiosk extends HTMLElement {
 
   home() {
     const main = this.screen();
+    main.className = "home-screen";
     const buttons = this.text(main, "div", "");
     buttons.className = "grid home";
     for (const [label, kind] of [["Visitor", "visitor"], ["Contractor", "contractor"]]) {
-      this.button(buttons, label, () => this.badges(label, kind));
+      const button = this.button(buttons, label, () => this.badges(label, kind));
+      button.className = kind;
+      const icon = document.createElement("ha-icon");
+      icon.setAttribute("icon", "mdi:badge-account-outline");
+      icon.setAttribute("aria-hidden", "true");
+      button.prepend(icon);
     }
   }
 
