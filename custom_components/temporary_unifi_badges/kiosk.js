@@ -80,8 +80,27 @@ class BadgeKiosk extends HTMLElement {
     }
   }
 
-  calendar(label, kind, badge, today) {
+  async calendar(label, kind, badge, today) {
+    const loading = this.screen(badge.name);
+    this.text(loading, "p", "Checking current badge status…");
+    this.button(loading, "Back", () => this.badges(label, kind));
+    let details;
+    try {
+      details = await this.connection.callWS({type: DOMAIN + "/details", kind, user_id: badge.id});
+    } catch (error) {
+      this.text(loading, "p", error?.message || "Could not check badge status.");
+      return;
+    }
+    if (!loading.isConnected) return;
+    const active = details.status === "ACTIVE";
     const main = this.screen(badge.name);
+    if (details.pending) {
+      this.text(main, "p", "Deactivation pending.");
+    } else if (active) {
+      this.text(main, "p", details.last_day
+        ? "Active through " + details.last_day + "."
+        : "Active in UniFi · No expiration set by Home Assistant.");
+    }
     const month = this.text(main, "div", "");
     month.className = "month";
     const prev = this.button(month, "‹", () => move(-1));
@@ -94,23 +113,26 @@ class BadgeKiosk extends HTMLElement {
     const field = this.text(main, "label", "Last valid day");
     const input = document.createElement("input");
     input.type = "date";
-    input.min = input.value = today;
+    input.min = today;
+    input.value = details.last_day && details.last_day >= today ? details.last_day : today;
     input.required = true;
     field.append(input);
     const status = this.text(main, "p", "");
     status.setAttribute("role", "status");
     const actions = this.text(main, "footer", "");
     const back = this.button(actions, "Back", () => this.badges(label, kind));
-    const activate = this.button(actions, "Activate", async () => {
+    const activate = this.button(actions, active ? "Update expiration" : "Activate", async () => {
       if (!input.reportValidity()) return;
       activate.disabled = back.disabled = input.disabled = true;
+      if (deactivate) deactivate.disabled = true;
       month.inert = grid.inert = true;
-      status.textContent = "Activating badge…";
+      status.textContent = active ? "Updating expiration…" : "Activating badge…";
       try {
         const result = await this.connection.callWS({
           type: DOMAIN + "/activate", kind, user_id: badge.id, last_day: input.value,
+          update_expiration: active,
         });
-        const done = this.screen(result.name + " activated");
+        const done = this.screen(result.name + (active ? " expiration updated" : " activated"));
         this.text(done, "p", "Valid through " + input.value + ".");
         this.button(done, "Done", () => this.home()).focus();
         setTimeout(() => { if (done.isConnected) this.home(); }, 8000);
@@ -118,11 +140,31 @@ class BadgeKiosk extends HTMLElement {
         status.textContent = error?.message || "Activation could not be confirmed.";
       } finally {
         activate.disabled = back.disabled = input.disabled = false;
+        if (deactivate) deactivate.disabled = false;
         month.inert = grid.inert = false;
       }
     });
 
-    let shown = new Date(today.slice(0, 7) + "-01T12:00:00");
+    activate.disabled = details.pending || !["ACTIVE", "DEACTIVATED"].includes(details.status);
+    const deactivate = active && !details.pending ? this.button(actions, "Deactivate now", async () => {
+      if (!window.confirm("Deactivate " + badge.name + " now?")) return;
+      activate.disabled = deactivate.disabled = back.disabled = input.disabled = true;
+      month.inert = grid.inert = true;
+      status.textContent = "Deactivating badge…";
+      try {
+        const result = await this.connection.callWS({
+          type: DOMAIN + "/deactivate", kind, user_id: badge.id,
+        });
+        const done = this.screen(result.name + (result.pending ? " deactivation pending" : " deactivated"));
+        this.button(done, "Done", () => this.home()).focus();
+      } catch (error) {
+        status.textContent = error?.message || "Deactivation could not be confirmed.";
+        activate.disabled = deactivate.disabled = back.disabled = input.disabled = false;
+        month.inert = grid.inert = false;
+      }
+    }) : null;
+
+    let shown = new Date(input.value.slice(0, 7) + "-01T12:00:00");
     function move(offset) {
       shown.setMonth(shown.getMonth() + offset);
       draw();
