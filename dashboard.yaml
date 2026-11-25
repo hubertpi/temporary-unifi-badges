@@ -1,0 +1,14 @@
+type: horizontal-stack
+cards:
+  - type: button
+    name: Activate Contractor Badge
+    icon: mdi:badge-account
+    tap_action:
+      action: fire-dom-event
+      temporary_unifi_badges: contractor
+  - type: button
+    name: Activate Visitor Badge
+    icon: mdi:badge-account-outline
+    tap_action:
+      action: fire-dom-event
+      temporary_unifi_badges: visitor
