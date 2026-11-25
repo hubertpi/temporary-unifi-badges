@@ -35,11 +35,26 @@ async def async_setup(hass, config):
     """Initialize the badge manager and recover persisted deadlines."""
     if DOMAIN not in config:
         return True
+    raw_settings = config[DOMAIN] or {}
+    if raw_settings == {"reuse_unifi_access": True}:
+        entries = [entry for entry in hass.config_entries.async_entries("unifi_access")
+                   if entry.disabled_by is None]
+        if len(entries) != 1:
+            LOGGER.error("Credential reuse requires exactly one enabled UniFi Access entry")
+            return False
+        entry = {**entries[0].data, **entries[0].options}
+        host = entry.get("host")
+        token = entry.get("api_token")
+        if not host or not token:
+            LOGGER.error("The UniFi Access entry does not contain a host and API token")
+            return False
+        url = host if host.startswith("https://") else f"https://{host}:12445"
+        raw_settings = {"url": url, "token": token, "verify_ssl": entry.get("verify_ssl", True)}
     settings = vol.Schema({
         vol.Required("url"): vol.All(str, vol.Match(r"^https://[^/]+/?$")),
         vol.Required("token"): vol.All(str, vol.Length(min=1)),
         vol.Optional("verify_ssl", default=True): bool,
-    })(config[DOMAIN])
+    })(raw_settings)
     session = async_get_clientsession(hass, verify_ssl=settings["verify_ssl"])
     store = Store(hass, 1, DOMAIN, atomic_writes=True)
     leases = await store.async_load() or {}
