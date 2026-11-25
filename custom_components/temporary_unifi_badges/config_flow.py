@@ -2,6 +2,14 @@
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.core import callback
+
+
+def settings_schema(options):
+    return vol.Schema({
+        vol.Optional("reader", description={"suggested_value": options.get("reader", "")}): str,
+        vol.Required("test_mode", default=options.get("test_mode", True)): bool,
+    })
 
 from . import DOMAIN
 
@@ -10,6 +18,11 @@ class BadgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Reuse an existing UniFi Access installation."""
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        return BadgeOptionsFlow()
 
     async def async_step_user(self, user_input=None):
         if self._async_current_entries():
@@ -29,5 +42,17 @@ class BadgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_create_entry(
                 title="Temporary UniFi Badges",
                 data={"reuse_unifi_access": True},
+                options=user_input,
             )
-        return self.async_show_form(step_id="user", data_schema=vol.Schema({}))
+        return self.async_show_form(step_id="user", data_schema=settings_schema({}))
+
+
+class BadgeOptionsFlow(config_entries.OptionsFlow):
+    """Configure the kiosk reader and test behavior."""
+
+    async def async_step_init(self, user_input=None):
+        if user_input is not None:
+            return self.async_create_entry(data=user_input)
+        return self.async_show_form(
+            step_id="init", data_schema=settings_schema(self.config_entry.options)
+        )
