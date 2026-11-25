@@ -3,12 +3,35 @@
     "step": {
       "user": {
         "title": "Temporary UniFi Badges",
-        "description": "Use the controller and API credential already stored in your UniFi Access integration."
+        "description": "Use the controller and API credential already stored in your UniFi Access integration.",
+        "data": {
+          "reader": "UniFi reader name or ID",
+          "test_mode": "Test mode"
+        },
+        "data_description": {
+          "reader": "Optional. Reserved for future badge-scan support.",
+          "test_mode": "Allow Home Assistant administrators to issue badges without a scan. With this off, activation is blocked until reader support is available."
+        }
       }
     },
     "abort": {
       "already_configured": "Temporary UniFi Badges is already configured.",
       "missing_unifi_access": "Set up one enabled UniFi Access integration with an API credential first."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Badge issuance settings",
+        "data": {
+          "reader": "UniFi reader name or ID",
+          "test_mode": "Test mode"
+        },
+        "data_description": {
+          "reader": "Optional. Reserved for future badge-scan support.",
+          "test_mode": "Allow Home Assistant administrators to issue badges without a scan. With this off, activation is blocked until reader support is available."
+        }
+      }
     }
   }
 }
