@@ -198,6 +198,14 @@ async def setup_manager(hass, raw_settings):
             connection.send_error(msg["id"], "invalid_date", "Choose a valid date.")
             return
 
+        entries = hass.config_entries.async_entries(DOMAIN)
+        if entries and not entries[0].options.get("test_mode", True):
+            connection.send_error(
+                msg["id"], "reader_required",
+                "Badge-scan activation is pending reader support. Enable Test mode for admin activation.",
+            )
+            return
+
         user_id = msg["user_id"]
         suffix = "/" + quote(user_id, safe="")
         try:
@@ -207,8 +215,15 @@ async def setup_manager(hass, raw_settings):
                 if badge is None:
                     raise ControllerError("This badge is no longer in the UniFi badge list.")
                 user = (await request("GET", suffix))["data"]
-                if user.get("status") != "DEACTIVATED" or user_id in leases:
-                    raise ControllerError("This badge must be inactive with no pending revocation.")
+                if user_id in leases:
+                    if leases[user_id]["pending"] or leases[user_id]["deadline"] <= dt.utcnow().timestamp():
+                        raise ControllerError("Deactivation is pending for this badge. Try again after UniFi confirms it.")
+                    raise ControllerError("This badge already has an active issuance.")
+                status = user.get("status")
+                if status == "ACTIVE":
+                    raise ControllerError("This user is already active in UniFi. Deactivate it in UniFi before issuing this badge.")
+                if status != "DEACTIVATED":
+                    raise ControllerError(f"UniFi reports status {status or 'unknown'}. The user must be deactivated before issuance.")
                 if deadline <= dt.utcnow().timestamp():
                     raise ControllerError("Choose today or a future date.")
                 lease = {"name": badge["name"], "deadline": deadline, "pending": True}
