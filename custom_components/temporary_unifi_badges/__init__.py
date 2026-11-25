@@ -202,7 +202,7 @@ async def setup_manager(hass, raw_settings):
                 lease = leases.get(msg["user_id"])
                 pending = bool(lease and (lease["pending"] or lease["deadline"] <= dt.utcnow().timestamp()))
                 last_day = None
-                if lease and not pending:
+                if lease and not pending and user.get("status") == "ACTIVE":
                     cutoff = dt.as_local(datetime.fromtimestamp(lease["deadline"], timezone.utc))
                     last_day = (cutoff.date() - timedelta(days=1)).isoformat()
         except ControllerError as err:
@@ -278,8 +278,13 @@ async def setup_manager(hass, raw_settings):
                     leases[user_id] = updated
                     connection.send_result(msg["id"], {"name": name})
                     return
-                if old or user.get("status") != "DEACTIVATED":
-                    raise ControllerError("This badge is not ready to issue. Reopen it to see its current status.")
+                status = user.get("status")
+                if status == "ACTIVE":
+                    raise ControllerError("This badge is now active in UniFi. Reopen it to update its expiration or deactivate it.")
+                if status != "DEACTIVATED":
+                    raise ControllerError(f"UniFi reports status {status or 'unknown'}. The badge must be deactivated before issuance.")
+                # A confirmed deactivation in UniFi supersedes a prior completed issuance.
+                # Saving the new pending lease atomically replaces that prior deadline.
                 lease = {"name": name, "deadline": deadline, "pending": True}
                 await store.async_save({**leases, user_id: lease})
                 leases[user_id] = lease
