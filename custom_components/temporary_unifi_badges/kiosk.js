@@ -21,6 +21,8 @@ class BadgeKiosk extends HTMLElement {
         border:1px solid var(--divider-color); border-radius:12px; min-height:48px; }
       button { cursor:pointer; padding:.5rem; }
       .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(100px,1fr)); gap:12px; }
+      .badge-grid { display:flex; flex-wrap:wrap; justify-content:center; gap:12px; }
+      .badge-grid button { flex:0 0 100px; box-sizing:border-box; }
       .home { grid-template-columns:1fr 1fr; }
       .home button { min-height:clamp(110px,22vh,240px); font-size:clamp(1.1rem,4vw,2rem); }
       .month { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
@@ -64,7 +66,7 @@ class BadgeKiosk extends HTMLElement {
     const status = this.text(main, "p", "Loading badges from UniFi…");
     status.setAttribute("role", "status");
     const buttons = this.text(main, "div", "");
-    buttons.className = "grid";
+    buttons.className = "badge-grid";
     const footer = this.text(main, "footer", "");
     this.button(footer, "Back", () => this.home());
     try {
