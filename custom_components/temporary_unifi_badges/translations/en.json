@@ -1,0 +1,14 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Temporary UniFi Badges",
+        "description": "Use the controller and API credential already stored in your UniFi Access integration."
+      }
+    },
+    "abort": {
+      "already_configured": "Temporary UniFi Badges is already configured.",
+      "missing_unifi_access": "Set up one enabled UniFi Access integration with an API credential first."
+    }
+  }
+}
