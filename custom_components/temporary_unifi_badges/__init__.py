@@ -9,7 +9,7 @@ from urllib.parse import quote
 
 import aiohttp
 import voluptuous as vol
-from homeassistant.components import persistent_notification, websocket_api
+from homeassistant.components import panel_custom, persistent_notification, websocket_api
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_time_interval
@@ -33,9 +33,16 @@ def badge_name(user):
 
 async def async_setup(hass, config):
     """Initialize the badge manager and recover persisted deadlines."""
-    if DOMAIN not in config:
+    if DOMAIN not in config or hass.config_entries.async_entries(DOMAIN):
         return True
-    raw_settings = config[DOMAIN] or {}
+    return await setup_manager(hass, config[DOMAIN] or {})
+
+
+async def async_setup_entry(hass, entry):
+    return await setup_manager(hass, entry.data)
+
+
+async def setup_manager(hass, raw_settings):
     if raw_settings == {"reuse_unifi_access": True}:
         entries = [entry for entry in hass.config_entries.async_entries("unifi_access")
                    if entry.disabled_by is None]
@@ -55,6 +62,8 @@ async def async_setup(hass, config):
         vol.Required("token"): vol.All(str, vol.Length(min=1)),
         vol.Optional("verify_ssl", default=True): bool,
     })(raw_settings)
+    if DOMAIN in hass.data:
+        return True
     session = async_get_clientsession(hass, verify_ssl=settings["verify_ssl"])
     store = Store(hass, 1, DOMAIN, atomic_writes=True)
     leases = await store.async_load() or {}
@@ -77,27 +86,56 @@ async def async_setup(hass, config):
         except (aiohttp.ClientError, TimeoutError, ValueError) as err:
             raise ControllerError("Could not confirm the operation with UniFi.") from err
 
+    cached_users = None
+    refreshed_at = float("-inf")
+    refresh_task = None
+    loop = asyncio.get_running_loop()
+
+    async def refresh_users():
+        nonlocal cached_users, refreshed_at
+        seen = {}
+        try:
+            async with asyncio.timeout(30):
+                for page in range(1, 1001):
+                    body = await request("GET", params={"page_num": page, "page_size": 25})
+                    users = body["data"]
+                    for user in users:
+                        if user["id"] in seen:
+                            raise ControllerError("UniFi returned duplicate users.")
+                        seen[user["id"]] = user
+                    if len(seen) >= body.get("pagination", {}).get("total", len(seen)):
+                        cached_users = tuple(user for user in seen.values() if badge_name(user))
+                        refreshed_at = loop.time()
+                        return True
+                    if not users:
+                        break
+        except (ControllerError, TimeoutError, KeyError, TypeError, ValueError):
+            LOGGER.debug("Could not refresh UniFi badge users", exc_info=True)
+        return False
+
+    def start_refresh():
+        nonlocal refresh_task
+        if refresh_task is None or refresh_task.done():
+            refresh_task = hass.async_create_background_task(
+                refresh_users(), "Refresh temporary UniFi badges"
+            )
+        return refresh_task
+
     async def list_badges(kind):
+        age = loop.time() - refreshed_at
+        if age >= 60:
+            task = start_refresh()
+            if age >= 300 and not await asyncio.shield(task):
+                raise ControllerError("Could not load badges from UniFi. Try again.")
         matches = {}
-        seen = set()
-        for page in range(1, 1001):
-            body = await request("GET", params={"page_num": page, "page_size": 25})
-            users = body["data"]
-            for user in users:
-                if user["id"] in seen:
-                    raise ControllerError("The UniFi user list changed. Reopen the popup.")
-                seen.add(user["id"])
-                match = badge_name(user)
-                if match and match[1].lower() == kind:
-                    number = int(match[2])
-                    if number in matches:
-                        raise ControllerError(f"Duplicate {kind} badge number {number} in UniFi.")
-                    matches[number] = {"id": user["id"], "name": match[0]}
-            if len(seen) >= body.get("pagination", {}).get("total", len(seen)):
-                return [matches[number] for number in sorted(matches)]
-            if not users:
-                break
-        raise ControllerError("Could not read the complete UniFi user list.")
+        for user in cached_users:
+            match = badge_name(user)
+            if match and match[1].lower() == kind:
+                number = int(match[2])
+                if number in matches:
+                    raise ControllerError(f"Duplicate {kind} badge number {number} in UniFi.")
+                matches[number] = {"id": user["id"], "name": match[0]}
+        return [matches[number] for number in sorted(matches)]
 
     async def set_status(suffix, status):
         await request("PUT", suffix, json={"status": status})
@@ -197,10 +235,23 @@ async def async_setup(hass, config):
             "/temporary_unifi_badges/dialog.js",
             str(Path(__file__).with_name("temporary-unifi-badges.js")),
             False,
-        )
+        ),
+        StaticPathConfig(
+            "/temporary_unifi_badges/kiosk.js",
+            str(Path(__file__).with_name("kiosk.js")),
+            False,
+        ),
     ])
+    await panel_custom.async_register_panel(
+        hass, webcomponent_name="temporary-unifi-badges-kiosk",
+        frontend_url_path="badge-issuance", sidebar_title="Badge Issuance",
+        sidebar_icon="mdi:badge-account", require_admin=True,
+        module_url="/temporary_unifi_badges/kiosk.js",
+    )
+    hass.data[DOMAIN] = True
     websocket_api.async_register_command(hass, ws_list)
     websocket_api.async_register_command(hass, ws_activate)
     async_track_time_interval(hass, expire, timedelta(seconds=15))
     hass.async_create_task(expire())
+    start_refresh()
     return True
