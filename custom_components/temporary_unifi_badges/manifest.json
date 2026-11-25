@@ -1,0 +1,1 @@
+{"domain":"temporary_unifi_badges","name":"Temporary UniFi Badges","version":"0.1.0","dependencies":["websocket_api"],"iot_class":"local_polling"}
