@@ -3,12 +3,14 @@
 import asyncio
 from datetime import date, datetime, time, timedelta, timezone
 import logging
+from pathlib import Path
 import re
 from urllib.parse import quote
 
 import aiohttp
 import voluptuous as vol
 from homeassistant.components import persistent_notification, websocket_api
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
@@ -175,6 +177,13 @@ async def async_setup(hass, config):
             return
         connection.send_result(msg["id"], {"name": badge["name"]})
 
+    await hass.http.async_register_static_paths([
+        StaticPathConfig(
+            "/temporary_unifi_badges/dialog.js",
+            str(Path(__file__).with_name("temporary-unifi-badges.js")),
+            False,
+        )
+    ])
     websocket_api.async_register_command(hass, ws_list)
     websocket_api.async_register_command(hass, ws_activate)
     async_track_time_interval(hass, expire, timedelta(seconds=15))
